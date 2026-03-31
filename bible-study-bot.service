@@ -1,0 +1,17 @@
+[Unit]
+Description=Bible Study Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=daniel
+WorkingDirectory=/home/daniel/bible-study-bot
+EnvironmentFile=/home/daniel/bible-study-bot/.env
+ExecStart=/usr/bin/python3 /home/daniel/bible-study-bot/bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

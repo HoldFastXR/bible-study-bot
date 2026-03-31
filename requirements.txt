@@ -1,0 +1,6 @@
+aiogram==3.7.0
+google-generativeai
+anthropic
+beautifulsoup4
+requests
+python-dotenv
