@@ -20,6 +20,7 @@ import datetime
 from pathlib import Path
 
 from gemini_client import generate
+from kb_writer import append_to_kb
 from system_prompts import PHASE1_SYSTEM_PROMPT, PHASE2_SYSTEM_PROMPT, PHASE3_SYSTEM_PROMPT
 from state import (
     get_active_passage,
@@ -55,6 +56,7 @@ Do not incorporate sermon material or application in this phase.
 
     output = generate(PHASE1_SYSTEM_PROMPT, prompt, inject_kb_context=False, use_claude=False)
     set_phase_complete(1, output)
+    append_to_kb("exegetical-phase-1", passage, output)
     return output
 
 
@@ -102,6 +104,7 @@ Do not reproduce illustrations or anecdotes. Focus on interpretive and theologic
 
     output = generate(PHASE2_SYSTEM_PROMPT, prompt, inject_kb_context=False, use_claude=False)
     set_phase_complete(2, output)
+    append_to_kb("exegetical-phase-2", passage, output)
     return output
 
 
@@ -147,8 +150,9 @@ This is distillation, not summary. Synthesize toward clarity and formation.
     # Phase 3 uses Claude Sonnet for best synthesis quality
     output = generate(PHASE3_SYSTEM_PROMPT, prompt, inject_kb_context=True, use_claude=True)
     set_phase_complete(3, output)
+    append_to_kb("journal-synthesis", passage, output)
 
-    # Write complete study to KB
+    # Write complete study to KB (all phases in one file, for reference)
     _write_study_to_kb(passage, phases["phase1"], phases["phase2"], output)
 
     return output
@@ -264,6 +268,7 @@ def write_side_study_to_kb(passage: str, phase1: str, phase3: str, phase2: str =
             f.write("\n\n---\n\n## Phase 2 — Notes\n\n")
             f.write(phase2)
 
+    append_to_kb("side-study-synthesis", passage, phase3)
     print(f"[study_session] Side study written to KB: {filepath}")
     return filepath
 

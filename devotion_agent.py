@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 import requests
 
 from gemini_client import generate
+from kb_writer import append_to_kb
 from system_prompts import DEVOTION_SYSTEM_PROMPT
 from state import get_active_passage, set_devotion_sent, devotion_sent_today, load_state
 
@@ -166,24 +167,8 @@ def log_devotion(content: str, passage: str):
 
 
 def write_to_kb(content: str, passage: str):
-    """
-    Writes today's devotion to the Chief of Staff knowledge base.
-    personal/bible-study/YYYY-MM-DD.md
-    """
-    kb_dir = os.path.expanduser("~/chief-of-staff/knowledge-base/personal/bible-study")
-    os.makedirs(kb_dir, exist_ok=True)
-
-    today = datetime.date.today()
-    filepath = os.path.join(kb_dir, f"{today.strftime('%Y-%m-%d')}.md")
-
-    angle_name, _ = get_today_angle()
-
-    with open(filepath, "w") as f:
-        f.write(f"---\ndate: {today.isoformat()}\npassage: {passage}\nfocus: {angle_name}\n---\n\n")
-        f.write(f"# Daily Devotion — {today.strftime('%B %d, %Y')}\n\n")
-        f.write(content)
-
-    print(f"[devotion] Written to KB: {filepath}")
+    """Appends today's devotion to the dated KB capture file."""
+    append_to_kb("daily-devo", passage, content)
 
 
 def run(force: bool = False):
