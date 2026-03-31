@@ -58,3 +58,21 @@ with no response to the user.
 - Phase 1 and Phase 2 complete for Mark 15:1-15
 - Monday March 30 devotion manually resent (Observation focus)
 - Bot restarted via `sudo systemctl restart bible-study-bot` (requires sudo)
+
+---
+
+# Session Summary — March 31, 2026
+
+## Work Done
+
+### GitHub Repository Created
+- Installed `gh` CLI v2.45.0 to `/usr/local/bin/gh`, authenticated as `HoldFastXR`
+- Initialized git repo at `/home/daniel/bible-study-bot`
+- Created `.gitignore` (excludes `.env`, `__pycache__/`, `logs/`, `sermons/`, `state.json`, `.claude/`)
+- Pushed 17 source files to **https://github.com/HoldFastXR/bible-study-bot** (public)
+- Secrets excluded — `.env` never committed
+
+## State After Session
+- Active passage: **Mark 15:1-15** (Phase 2 complete, awaiting Phase 3)
+- GitHub repo live and up to date with all source files
+- **Action needed:** Rotate API keys (Telegram, Gemini, Anthropic) — keys were read during session exploration and should be considered exposed
