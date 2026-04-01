@@ -28,7 +28,7 @@ import requests
 from gemini_client import generate
 from kb_writer import append_to_kb
 from system_prompts import DEVOTION_SYSTEM_PROMPT
-from state import get_active_passage, set_devotion_sent, devotion_sent_today, load_state
+from state import get_active_passage, set_devotion_sent, devotion_sent_today, load_state, get_devotion_focus
 
 load_dotenv()
 
@@ -70,6 +70,9 @@ def generate_devotion(passage: str) -> str:
     today = datetime.date.today()
     day_name = today.strftime("%A")
 
+    focus_override = get_devotion_focus()
+    focus_note = f"\nThematic focus for this week (user-specified): {focus_override}\nLet this shape the Application and Prayer sections without overriding the text's own emphasis.\n" if focus_override else ""
+
     prompt = f"""
 Generate a daily Bible devotion for {day_name}, {today.strftime("%B %d, %Y")}.
 
@@ -77,7 +80,7 @@ Passage for the week: {passage}
 
 Today's focus — {angle_name}:
 {angle_instruction}
-
+{focus_note}
 Format the output with these sections (use markdown bold for headers):
 **Scripture** (ESV)
 **{angle_name}**

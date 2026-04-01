@@ -19,6 +19,7 @@ DEFAULT_STATE = {
     "sermon_date": None,             # date of fetched sermon (YYYY-MM-DD)
     "sermon_file": None,             # path to stored transcript
     "last_devotion_sent": None,      # date of last devotion (YYYY-MM-DD)
+    "devotion_focus": None,          # optional thematic/angle override set by user
     "phase1_output": None,           # stored Phase 1 result
     "phase2_output": None,           # stored Phase 2 result
 }
@@ -100,3 +101,13 @@ def devotion_sent_today() -> bool:
     state = load_state()
     today = datetime.utcnow().strftime("%Y-%m-%d")
     return state.get("last_devotion_sent") == today
+
+
+def set_devotion_focus(focus: str | None):
+    state = load_state()
+    state["devotion_focus"] = focus
+    save_state(state)
+
+
+def get_devotion_focus() -> str | None:
+    return load_state().get("devotion_focus")

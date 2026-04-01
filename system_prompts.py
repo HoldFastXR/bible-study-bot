@@ -219,7 +219,7 @@ DEVOTION FORMAT:
 Structure each devotion as:
 
 **Scripture** (ESV)
-[Full passage text, identified as ESV]
+[Quote only the 1–3 verses most directly relevant to today's focus angle. Do not quote the full passage. Cite the reference clearly (e.g. Mark 15:2, ESV).]
 
 **[Focus Angle]**
 [The day's lens: Observation / Key Term / Cross-Reference / Redemptive-Historical / Application / Weekly Summary]

@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 
 from devotion_agent import run as run_devotion
 from gemini_client import generate_with_history
-from state import get_active_passage, set_active_passage
+from state import get_active_passage, set_active_passage, set_devotion_focus, get_devotion_focus
 from study_session import (
     get_status_message,
     run_phase1,
@@ -101,6 +101,13 @@ INTENTS:
                      Phrases like: "devotion", "today's devotion", "morning reading", "give me the devotion"
   STATUS           — User wants to know current study state, active passage, or study progress.
                      Phrases like: "where are we", "what's the current passage", "study status", "what phase"
+  SET_DEVOTION_FOCUS — User wants to set a thematic or contextual focus for this week's devotions.
+                     Phrases like: "focus devotions on", "I'm thinking about", "adjust the focus to",
+                     "this week lean into", "apply devotions to", "focus on [theme] this week".
+                     Extract the focus description.
+  CLEAR_DEVOTION_FOCUS — User wants to remove the devotion focus override.
+                     Phrases like: "clear the focus", "remove the devotion focus", "back to normal devotions",
+                     "reset devotion focus".
   FETCH_SERMON     — User wants to manually trigger the sermon fetch pipeline.
                      Phrases like: "fetch the sermon", "get this week's sermon", "check for the sermon",
                      "run the pipeline", "grab the sermon transcript"
@@ -119,6 +126,7 @@ Return format (always valid JSON, nothing else):
 {
   "intent": "INTENT_NAME",
   "passage": "extracted passage or null",
+  "focus": "extracted focus description or null",
   "confidence": "high|medium|low"
 }
 
@@ -131,7 +139,10 @@ Examples:
   "I want to look at Romans 8:28-39" → {"intent": "SIDE_STUDY", "passage": "Romans 8:28-39", "confidence": "high"}
   "Now synthesize that" → {"intent": "SIDE_JOURNAL", "passage": null, "confidence": "high"}
   "Save that to the KB" → {"intent": "SAVE_STUDY", "passage": null, "confidence": "high"}
-  "Fetch the sermon" → {"intent": "FETCH_SERMON", "passage": null, "confidence": "high"}
+  "Fetch the sermon" → {"intent": "FETCH_SERMON", "passage": null, "focus": null, "confidence": "high"}
+  "Focus devotions this week on perseverance under pressure" → {"intent": "SET_DEVOTION_FOCUS", "passage": null, "focus": "perseverance under pressure", "confidence": "high"}
+  "I'm thinking a lot about leading through uncertainty, lean the devotions into that" → {"intent": "SET_DEVOTION_FOCUS", "passage": null, "focus": "leading through uncertainty", "confidence": "high"}
+  "Clear the devotion focus" → {"intent": "CLEAR_DEVOTION_FOCUS", "passage": null, "focus": null, "confidence": "high"}
   "What do you think about Psalm 46?" → {"intent": "CLARIFY_PASSAGE", "passage": "Psalm 46", "confidence": "high"}
   "What is agonizomai?" → {"intent": "DIALOGUE", "passage": null, "confidence": "high"}
   "How does covenant theology work?" → {"intent": "DIALOGUE", "passage": null, "confidence": "high"}
@@ -354,6 +365,24 @@ async def handle_save_study(message: Message):
     )
 
 
+async def handle_set_devotion_focus(message: Message, focus: str):
+    set_devotion_focus(focus)
+    await message.answer(
+        f"✅ Devotion focus set: *{focus}*\n\n"
+        f"This will shape the Application and Prayer sections of each devotion this week. "
+        f"Say *\"clear the devotion focus\"* to return to the default.",
+        parse_mode="Markdown"
+    )
+
+
+async def handle_clear_devotion_focus(message: Message):
+    set_devotion_focus(None)
+    await message.answer(
+        "✅ Devotion focus cleared — back to the standard daily angle.",
+        parse_mode="Markdown"
+    )
+
+
 async def handle_clarify_passage(message: Message, passage: str):
     """Ask whether they want to study the passage or ask a question about it."""
     pending_clarification["active"] = True
@@ -455,10 +484,17 @@ async def handle_message(message: Message):
 
     intent = classification.get("intent", "DIALOGUE")
     passage = classification.get("passage")
+    focus = classification.get("focus")
 
     log.info(f"Intent: {intent} | Passage: {passage} | Confidence: {classification.get('confidence')}")
 
-    if intent == "SET_PASSAGE" and passage:
+    if intent == "SET_DEVOTION_FOCUS" and focus:
+        await handle_set_devotion_focus(message, focus)
+
+    elif intent == "CLEAR_DEVOTION_FOCUS":
+        await handle_clear_devotion_focus(message)
+
+    elif intent == "SET_PASSAGE" and passage:
         await handle_set_passage(message, passage)
 
     elif intent == "RUN_PHASE1":
@@ -538,6 +574,8 @@ async def cmd_help(message: Message):
             "• *\"Synthesize that\"* — journal entry for side study\n"
             "• *\"Save this study\"* — logs side study to KB\n"
             "• *\"Give me today's devotion\"* — morning devotion\n"
+            "• *\"Focus devotions on perseverance this week\"* — thematic focus overlay\n"
+            "• *\"Clear the devotion focus\"* — remove focus override\n"
             "• *\"Where are we in the study?\"* — current progress\n\n"
             "Or just ask a Bible question directly.",
             parse_mode="Markdown"
