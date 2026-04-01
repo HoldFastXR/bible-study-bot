@@ -3,8 +3,10 @@ gemini_client.py
 Unified AI client for the Bible Study Bot.
 
 Routing:
+  Daily devotions            → Claude Sonnet (primary user-facing product; no ESV copyright issues)
   Phase 3 journal synthesis  → Claude Sonnet (best reasoning, ~$0.05-0.08/call)
-  Everything else            → Gemini 2.0 Flash (free tier, 1,500 req/day)
+  Phase 1 / Phase 2          → Gemini 2.5 Flash (free tier, 1,500 req/day)
+  Dialogue / intent classify → Gemini 2.5 Flash (free tier)
 
 Fallback: if Anthropic API call fails, falls back to Gemini with a warning.
 This keeps the bot operational even if API credits run out.
@@ -21,17 +23,17 @@ load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 GEMINI_MODEL = "gemini-2.5-flash"
 
-# ── Configure Anthropic (optional — Phase 3 only) ────────────────────────────
+# ── Configure Anthropic (devotions + Phase 3) ────────────────────────────────
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-ANTHROPIC_MODEL = "claude-sonnet-4-5"  # Best balance of quality and cost
+ANTHROPIC_MODEL = "claude-sonnet-4-6"  # Latest Sonnet — devotions + Phase 3
 
 try:
     import anthropic
     _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 except ImportError:
     _anthropic_client = None
-    print("[gemini_client] anthropic package not installed — Phase 3 will use Gemini fallback.")
+    print("[gemini_client] anthropic package not installed — devotions and Phase 3 will use Gemini fallback.")
 
 
 # ── KB Context Injection ──────────────────────────────────────────────────────
@@ -106,7 +108,7 @@ def _gemini_generate_with_history(
 # ── Anthropic Generation ──────────────────────────────────────────────────────
 
 def _claude_generate(system_prompt: str, user_prompt: str) -> str:
-    """Single-turn Claude Sonnet call. Used for Phase 3 synthesis."""
+    """Single-turn Claude Sonnet call. Used for devotions and Phase 3 synthesis."""
     if not _anthropic_client:
         raise RuntimeError("Anthropic client not available")
 
@@ -129,7 +131,7 @@ def generate(
 ) -> str:
     """
     Single-turn generation.
-    use_claude=True routes to Claude Sonnet (Phase 3 only).
+    use_claude=True routes to Claude Sonnet (devotions and Phase 3).
     Falls back to Gemini if Claude is unavailable.
     """
     if inject_kb_context:

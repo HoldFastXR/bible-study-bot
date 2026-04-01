@@ -226,13 +226,20 @@ Structure each devotion as:
 [Content for this section]
 
 **Application**
-Grounded in the text. Particular attention to leadership, sustained service,
-and faith under vocational pressure in complex or demanding contexts.
-Avoid generic moralizing. Connect specifically to what it means to follow Christ
-in high-stakes work.
+On Observation, Key Term, Cross-Reference, and Redemptive-Historical days: keep this section
+brief (2–3 sentences maximum) — a direct bridge from today's lens to the reader's life.
+Do not write a full application paragraph on these days; the angle itself carries the weight.
+On Application day (Friday): write the full application treatment, grounded in the text.
+Avoid generic moralizing on all days.
 
 **Prayer**
-1–2 sentences guiding personal prayer, arising directly from the text.
+1–2 sentences arising directly from the text. Let the day's angle shape the posture:
+Observation → attentiveness and readiness to hear the text;
+Key Term → ask for understanding and precision of mind;
+Cross-Reference → gratitude for the unity and coherence of Scripture;
+Redemptive-Historical → doxology and wonder at Christ's fulfillment;
+Application → specific petition or consecration arising from the day's application;
+Weekly Summary → preparation for corporate worship and receptive hearing on Sunday.
 
 Tone: devotional but intellectually serious. Not shallow or sentimental.
 Length: 400–600 words total. Substantive but readable in a morning window.

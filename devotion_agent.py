@@ -42,12 +42,34 @@ LOGS_DIR = Path(__file__).parent / "logs"
 
 DAY_ANGLES = {
     0: ("Observation", "Focus on what the text actually says. Work through the passage verse by verse or in natural units. Identify the key observations — structure, repetition, contrasts, narrative movement. Help the reader slow down and see what is there before interpreting it."),
-    1: ("Key Term", "Select one or two key terms or phrases from the passage that are load-bearing for interpretation. Where helpful, note the original Hebrew or Greek. Keep it accessible — transliterate, explain in plain English, show why it matters for understanding the passage."),
-    2: ("Cross-Reference", "Trace one or two significant cross-reference threads from the passage. Show how other parts of Scripture illuminate, echo, or develop what this text says. Let Scripture interpret Scripture. Prioritize canonical connections over commentary."),
+    1: ("Key Term", "Select one or two terms that are structurally or semantically load-bearing for the passage's meaning — terms where getting the word right changes how the passage reads. Prefer: terms whose English translations diverge or flatten the original, terms carrying intertextual freight (used significantly elsewhere in Scripture), or terms whose grammatical form carries exegetical weight. Avoid selecting a term simply because it is a well-known theological word. Where the original Hebrew or Greek clarifies meaning, note it: transliterate, explain in plain English, show why it matters. Keep it accessible."),
+    2: ("Cross-Reference", "Trace one or two significant cross-reference threads from the passage. Prioritize Old Testament connections — typological patterns, covenant echoes, prophetic fulfillments, and intra-canonical threads that show how the OT anticipates or is resolved by this text. NT-to-NT cross-references are valid but secondary. Show how the connected passage illuminates, deepens, or reframes what this text says. Let Scripture interpret Scripture. Prioritize canonical depth over surface-level parallel citation."),
     3: ("Redemptive-Historical", "Read this passage through the lens of redemptive history. How does it fit in the unfolding story of Scripture? What does it anticipate, fulfill, or extend? Connect it to Christ through promise-fulfillment, typology, or covenantal development — not speculative allegory."),
-    4: ("Application", "Focus on application — particularly to leadership, sustained service under pressure, and faith in difficult or complex vocational contexts. Ground the application in the text. Avoid generic moralizing. Connect it specifically to what it means to follow Christ in demanding, high-stakes work."),
+    4: ("Application", "Begin with what this passage specifically calls for — not a general Christian virtue, but the particular claim this text makes on the reader. Derive the application from the text's own movement: what does it demand, promise, warn, or invite? Then, where genuinely grounded in that textual claim, consider how it bears on sustained service, faith under pressure, or complex vocational decisions. The vocational context is a legitimate landing zone, not a predetermined destination. If the text's primary application is worship, repentance, comfort, or awe rather than action, say so — do not force a leadership frame onto a passage whose movement is Christological or doxological. Avoid generic moralizing."),
     5: ("Weekly Summary", "Bring the week's study together. Briefly synthesize the key observations, interpretive insights, and applications from the passage. Then pivot forward: what should the reader be listening for when they hear this passage preached on Sunday? What question or theme should they carry into worship?"),
 }
+
+
+def load_week_devotions() -> str:
+    """
+    Loads Mon–Fri devotion logs for the current week to give Saturday's
+    Weekly Summary prompt actual context to synthesize.
+    Returns a condensed string of prior outputs, or empty string if unavailable.
+    """
+    today = datetime.date.today()
+    # Find Monday of this week
+    monday = today - datetime.timedelta(days=today.weekday())
+    summaries = []
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    for i, day_name in enumerate(day_names):
+        log_date = monday + datetime.timedelta(days=i)
+        log_path = LOGS_DIR / f"devotion_{log_date.strftime('%Y-%m-%d')}.txt"
+        if log_path.exists():
+            content = log_path.read_text().strip()
+            # Trim to first 600 chars to keep prompt size manageable
+            excerpt = content[:600] + ("..." if len(content) > 600 else "")
+            summaries.append(f"[{day_name}]\n{excerpt}")
+    return "\n\n".join(summaries)
 
 
 def get_today_angle() -> tuple[str, str]:
@@ -73,6 +95,12 @@ def generate_devotion(passage: str) -> str:
     focus_override = get_devotion_focus()
     focus_note = f"\nThematic focus for this week (user-specified): {focus_override}\nLet this shape the Application and Prayer sections without overriding the text's own emphasis.\n" if focus_override else ""
 
+    week_context = ""
+    if angle_name == "Weekly Summary":
+        prior = load_week_devotions()
+        if prior:
+            week_context = f"\nThis week's prior devotions (use to synthesize, not just summarize the passage again):\n\n{prior}\n"
+
     prompt = f"""
 Generate a daily Bible devotion for {day_name}, {today.strftime("%B %d, %Y")}.
 
@@ -80,7 +108,7 @@ Passage for the week: {passage}
 
 Today's focus — {angle_name}:
 {angle_instruction}
-{focus_note}
+{focus_note}{week_context}
 Format the output with these sections (use markdown bold for headers):
 **Scripture** (ESV)
 **{angle_name}**
@@ -91,7 +119,7 @@ Length: 400–600 words. Substantive but readable in a morning window.
 Do not add introductory preamble. Begin directly with the Scripture section.
 """
 
-    return generate(DEVOTION_SYSTEM_PROMPT, prompt, inject_kb_context=True)
+    return generate(DEVOTION_SYSTEM_PROMPT, prompt, inject_kb_context=True, use_claude=True)
 
 
 def strip_html(text: str) -> str:

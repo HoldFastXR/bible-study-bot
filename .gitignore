@@ -17,7 +17,7 @@ dist/
 build/
 
 # Runtime data
-logs/
+# logs/ intentionally tracked — devotion outputs needed for quality audits
 *.log
 sermons/
 
