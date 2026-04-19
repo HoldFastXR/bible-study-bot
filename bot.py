@@ -46,6 +46,10 @@ from study_session import (
 )
 from system_prompts import DIALOGUE_SYSTEM_PROMPT
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path.home()))
+from shared.conversation import ConversationStore
+
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -57,8 +61,13 @@ log = logging.getLogger(__name__)
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# In-memory stores
-dialogue_history: list[dict] = []
+_conv_store = ConversationStore("logos", max_exchanges=20, ttl_seconds=86400)
+try:
+    _conv_store.evict_stale()
+except Exception:
+    pass
+
+# In-memory stores (dialogue_history replaced by SQLite-backed _conv_store)
 side_study_session: dict = {
     "passage": None,
     "phase1": None,
@@ -176,10 +185,12 @@ def is_authorized(message: Message) -> bool:
     return str(message.chat.id) == str(TELEGRAM_CHAT_ID)
 
 
-def trim_history():
-    global dialogue_history
-    if len(dialogue_history) > 40:
-        dialogue_history = dialogue_history[-40:]
+def _logos_chat_id() -> int:
+    """Canonical chat_id key for Logos' single user."""
+    try:
+        return int(TELEGRAM_CHAT_ID)
+    except (TypeError, ValueError):
+        return 0
 
 
 def strip_html(text: str) -> str:
@@ -371,17 +382,21 @@ async def handle_dialogue(message: Message, text: str):
 
     try:
         loop = asyncio.get_event_loop()
+        _cid = _logos_chat_id()
+        prior = _conv_store.get_history(_cid) or None
         response = await loop.run_in_executor(
             None,
             generate_with_history,
             DIALOGUE_SYSTEM_PROMPT + context_note,
-            dialogue_history.copy(),
+            prior,
             text,
             False,
         )
-        dialogue_history.append({"role": "user", "parts": [text]})
-        dialogue_history.append({"role": "model", "parts": [response]})
-        trim_history()
+        _conv_store.append_exchange(
+            _cid,
+            {"role": "user", "parts": [text]},
+            {"role": "model", "parts": [response]},
+        )
         await send_long(str(message.chat.id), response)
 
     except Exception as e:
