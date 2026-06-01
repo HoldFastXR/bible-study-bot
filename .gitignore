@@ -20,6 +20,8 @@ build/
 logs/
 *.log
 sermons/
+rendered/
+.esv_cache/
 
 # State files (runtime, not source)
 state.json

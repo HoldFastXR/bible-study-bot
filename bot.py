@@ -25,23 +25,27 @@ import json
 import logging
 import os
 import re
+import subprocess
+from pathlib import Path
 
 import google.generativeai as genai
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import FSInputFile, Message
 from dotenv import load_dotenv
 
 from devotion_agent import run as run_devotion
+from esv_client import get_passage_text
 from gemini_client import generate_with_history
+from html_renderer import write_study_html
+import logos_io
+
+LOGOS_WEEK_SCRIPT = "/home/daniel/chief-of-staff/run_logos_week.sh"
+LOGOS_JOURNAL_SCRIPT = "/home/daniel/chief-of-staff/run_logos_journal.sh"
+LOGOS_STUDY_SCRIPT = "/home/daniel/chief-of-staff/run_logos_study.sh"
 from state import get_active_passage, set_active_passage
 from study_session import (
     get_status_message,
-    run_phase1,
-    run_phase2,
-    run_phase3,
-    run_side_study_phase1,
-    run_side_study_phase3,
     write_side_study_to_kb,
 )
 from system_prompts import DIALOGUE_SYSTEM_PROMPT
@@ -205,16 +209,84 @@ async def send_long(chat_id: str, text: str):
         await bot.send_message(chat_id, chunk)
 
 
+def _kick_cc_detached(script: str, *args: str) -> bool:
+    """Fire-and-forget CC run. The run script handles its own Telegram notification."""
+    try:
+        subprocess.Popen(
+            [script, *args],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return True
+    except Exception as e:
+        log.error(f"failed to spawn {script}: {e}")
+        return False
+
+
+async def _await_cc_run(script: str, *args: str, timeout: int = 900) -> tuple[int, str, str]:
+    """Run a CC script and await completion. Returns (returncode, stdout, stderr)."""
+    proc = await asyncio.create_subprocess_exec(
+        script, *args,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill(); await proc.communicate()
+        return 124, "", "timeout"
+    return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
+
+
+async def send_html_file(chat_id: str, path: Path, caption: str):
+    """Send a pre-rendered HTML document via Telegram, with text fallback."""
+    try:
+        await bot.send_document(chat_id, FSInputFile(str(path)), caption=caption)
+    except Exception as e:
+        log.error(f"send_document failed for {path}: {e}")
+        await bot.send_message(chat_id, f"⚠️ Could not send {path.name}: {e}")
+
+
+async def send_study_html(chat_id: str, title: str, subtitle: str, body: str, slug: str,
+                          caption: str, passage: str | None = None):
+    """
+    Render a long-form study/journal output to a styled HTML file and send it as a
+    Telegram document so Daniel can read it in a browser rather than in-chat.
+    When a passage is given, its ESV text is fetched and shown above the study.
+    Falls back to chunked plain text if rendering or upload fails.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        scripture = (
+            await loop.run_in_executor(None, get_passage_text, passage)
+            if passage else None
+        )
+        path = await loop.run_in_executor(
+            None, write_study_html, title, subtitle, body, slug, scripture
+        )
+        await bot.send_document(chat_id, FSInputFile(path), caption=caption)
+    except Exception as e:
+        log.error(f"HTML document send failed ({e}); falling back to text.")
+        await send_long(chat_id, body)
+
+
 # ── Intent Handlers ───────────────────────────────────────────────────────────
 
 async def handle_set_passage(message: Message, passage: str):
     set_active_passage(passage)
-    await message.answer(
-        f"✅ Weekly passage set: *{passage}*\n\n"
-        f"Daily devotions will draw from this passage. "
-        f"When you're ready, just say *let's study* to begin Phase 1.",
-        parse_mode="Markdown"
-    )
+    kicked = _kick_cc_detached(LOGOS_WEEK_SCRIPT, passage)
+    if kicked:
+        await message.answer(
+            f"✅ Weekly passage set: *{passage}*\n\n"
+            f"Kicking the Logos weekly batch (Phase 1 + Mon–Sat devotions). "
+            f"I'll notify you when the week is ready — typically a few minutes.",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            f"✅ Weekly passage set: *{passage}*\n\n"
+            f"⚠️ Could not launch the weekly batch — say *generate the week* to retry.",
+            parse_mode="Markdown"
+        )
 
 
 async def handle_run_phase1(message: Message):
@@ -226,84 +298,143 @@ async def handle_run_phase1(message: Message):
             parse_mode="Markdown"
         )
         return
-    await message.answer(f"📖 Running Phase 1 exegetical study of *{passage}*...", parse_mode="Markdown")
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, run_phase1)
-    await send_long(str(message.chat.id), result)
+
+    # Prefer the pre-generated Phase 1 HTML from this week's Logos batch.
+    html = logos_io.phase_path("phase1", "html")
+    if html.exists():
+        await send_html_file(
+            str(message.chat.id), html,
+            caption=f"📖 Phase 1 — exegetical study of {passage}."
+        )
+        return
+
+    # Not generated yet — kick the batch and tell Daniel.
+    kicked = _kick_cc_detached(LOGOS_WEEK_SCRIPT, passage)
+    if kicked:
+        await message.answer(
+            f"📖 No Phase 1 yet for *{passage}* — kicking the weekly batch now. "
+            f"I'll send Phase 1 + Mon–Sat devotions when it finishes (typically a few minutes).",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            "⚠️ Could not launch the weekly batch. Check `logos_run.log`.",
+            parse_mode="Markdown"
+        )
 
 
 async def handle_run_phase2(message: Message):
-    passage = get_active_passage()
-    await message.answer(f"📖 Running Phase 2 sermon analysis for *{passage}*...", parse_mode="Markdown")
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, run_phase2)
-    await send_long(str(message.chat.id), result)
+    await message.answer(
+        "Phase 2 and Phase 3 are now produced together by Claude in one run "
+        "(sermon insights + synthesis, building on the already-locked Phase 1). "
+        "Just say *write the journal entry* and I'll run it.",
+        parse_mode="Markdown"
+    )
 
 
 async def handle_run_phase3(message: Message):
     passage = get_active_passage()
+    if not passage:
+        await message.answer("No weekly passage set yet.", parse_mode="Markdown")
+        return
+
+    html = logos_io.phase_path("phase3", "html")
+    if html.exists():
+        await send_html_file(
+            str(message.chat.id), html,
+            caption=f"📓 Phase 3 — journal synthesis for {passage}."
+        )
+        return
+
+    # Need to run /logos-journal — sermon transcript must be available, Phase 1 must exist.
+    if not logos_io.phase_path("phase1", "md").exists():
+        await message.answer(
+            "⚠️ Phase 1 hasn't been generated yet for this week. "
+            "Set the passage (or wait for Sunday's sermon fetch) — that kicks Phase 1.",
+            parse_mode="Markdown"
+        )
+        return
+
     await message.answer(
-        f"📖 Writing journal synthesis for *{passage}*...\n_(using Claude Sonnet — may take a moment)_",
+        f"📓 Writing the journal entry for *{passage}* — Claude is doing Phase 2 (sermon) "
+        f"+ Phase 3 (synthesis) in one pass. Back in a few minutes...",
         parse_mode="Markdown"
     )
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, run_phase3)
-    await send_long(str(message.chat.id), result)
-    if "⚠️" not in result:
-        await message.answer("✅ Study saved to knowledge base.", parse_mode="Markdown")
+    rc, out, err = await _await_cc_run(LOGOS_JOURNAL_SCRIPT)
+    if rc != 0 or not html.exists():
+        await message.answer(
+            f"⚠️ Journal run failed (rc={rc}). Check `logos_run.log` for details.",
+            parse_mode="Markdown"
+        )
+        return
+    await send_html_file(
+        str(message.chat.id), html,
+        caption=f"📓 Phase 3 — journal synthesis for {passage}."
+    )
+    await message.answer("✅ Study saved to knowledge base.", parse_mode="Markdown")
 
 
 async def handle_side_study(message: Message, passage: str):
     await message.answer(
-        f"📖 Running Phase 1 exegetical study of *{passage}*...\n"
-        f"_(Side study — weekly passage unchanged)_",
+        f"📖 Running side study of *{passage}* — Claude is producing Phase 1 + "
+        f"Phase 3 (no sermon, text-first). Back in a few minutes...\n"
+        f"_(Weekly passage unchanged.)_",
         parse_mode="Markdown"
     )
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, run_side_study_phase1, passage)
+    rc, out, err = await _await_cc_run(LOGOS_STUDY_SCRIPT, passage)
+    if rc != 0:
+        await message.answer(
+            f"⚠️ Side study failed (rc={rc}). Check `logos_run.log`.",
+            parse_mode="Markdown"
+        )
+        return
+    out_dir = Path(out.strip().splitlines()[-1]) if out.strip() else None
+    if not out_dir or not out_dir.exists():
+        await message.answer("⚠️ Side study finished but output dir not found.")
+        return
 
     side_study_session["passage"] = passage
-    side_study_session["phase1"] = result
+    side_study_session["dir"] = str(out_dir)
+    side_study_session["phase1"] = None
     side_study_session["phase2"] = None
     side_study_session["phase3"] = None
 
-    await send_long(str(message.chat.id), result)
+    chat_id = str(message.chat.id)
+    p1 = out_dir / "phase1.html"
+    p3 = out_dir / "phase3.html"
+    if p1.exists():
+        await send_html_file(chat_id, p1, caption=f"📖 Phase 1 — side study of {passage}.")
+    if p3.exists():
+        await send_html_file(chat_id, p3, caption=f"📓 Phase 3 — synthesis for {passage}.")
     await message.answer(
-        f"Phase 1 complete for *{passage}*. "
-        f"Say *synthesize that* when you want the journal entry, "
-        f"or *save this study* to log it to the knowledge base.",
+        f"Side study complete for *{passage}*. Say *save this study* to log it to the "
+        f"knowledge base.",
         parse_mode="Markdown"
     )
 
 
 async def handle_side_journal(message: Message):
-    if not side_study_session.get("phase1"):
+    # The side-study CC run produces Phase 1 + Phase 3 together. There's nothing
+    # extra to synthesize — just re-send the existing synthesis HTML.
+    out_dir = side_study_session.get("dir")
+    if not out_dir:
         await message.answer(
             "No side study in progress. Just name a passage — "
             "something like *\"study Psalm 46\"* — to begin.",
             parse_mode="Markdown"
         )
         return
-
-    passage = side_study_session["passage"]
-    await message.answer(
-        f"📖 Writing synthesis for *{passage}*...\n_(using Claude Sonnet)_",
-        parse_mode="Markdown"
-    )
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        None,
-        run_side_study_phase3,
-        passage,
-        side_study_session["phase1"],
-        side_study_session.get("phase2"),
-    )
-    side_study_session["phase3"] = result
-    await send_long(str(message.chat.id), result)
-    await message.answer(
-        "Synthesis done. Say *save this study* to log it to the knowledge base.",
-        parse_mode="Markdown"
-    )
+    passage = side_study_session.get("passage", "passage")
+    p3 = Path(out_dir) / "phase3.html"
+    if p3.exists():
+        await send_html_file(str(message.chat.id), p3,
+                             caption=f"📓 Phase 3 — synthesis for {passage}.")
+    else:
+        await message.answer(
+            "Phase 3 wasn't produced for that side study (unexpected). "
+            "Say *study [passage]* to re-run.",
+            parse_mode="Markdown"
+        )
 
 
 async def handle_fetch_sermon(message: Message):
@@ -345,19 +476,25 @@ async def handle_fetch_sermon(message: Message):
 
 
 async def handle_save_study(message: Message):
-    if not side_study_session.get("phase1"):
+    out_dir = side_study_session.get("dir")
+    passage = side_study_session.get("passage")
+    if not out_dir or not passage:
         await message.answer("No side study to save yet.", parse_mode="Markdown")
         return
 
-    passage = side_study_session["passage"]
+    p1 = (Path(out_dir) / "phase1.md")
+    p3 = (Path(out_dir) / "phase3.md")
+    phase1_md = p1.read_text(encoding="utf-8") if p1.exists() else "(Phase 1 not found)"
+    phase3_md = p3.read_text(encoding="utf-8") if p3.exists() else "(Phase 3 not run)"
+
     loop = asyncio.get_event_loop()
     filepath = await loop.run_in_executor(
         None,
         write_side_study_to_kb,
         passage,
-        side_study_session["phase1"],
-        side_study_session.get("phase3") or "(Phase 3 not run)",
-        side_study_session.get("phase2"),
+        phase1_md,
+        phase3_md,
+        None,
     )
     await message.answer(
         f"✅ *{passage}* saved to knowledge base.",

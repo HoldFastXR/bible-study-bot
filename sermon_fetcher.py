@@ -13,10 +13,12 @@ Sunday evening automation. Single cron entry does everything:
 
 After this runs, Daniel's only manual step for the weekly study is triggering Phase 3.
 
-Site structure (confirmed by inspection):
-  - Index at /luke/ — most recent sermon listed first as h2 > a
-  - Title format: "LUKE 14:12-24" or "LUKE 13:31-35" — passage is always in the title
-  - Full transcript is plain HTML body text, no login required
+Site structure (Wix-hosted, confirmed 2026-05-28):
+  - Index at /sermons/ — each sermon is a `div.wixui-repeater__item` card,
+    listed newest-first, containing an <h3> title, a "/sermon/<slug>" detail
+    link, and a "Month D, YYYY" date line. Empty placeholder cards exist.
+  - Title format: "LUKE 16:14-15" — passage is always in the title.
+  - Detail page transcript lives in <main>; plain body text, no login required.
 """
 
 import os
@@ -89,6 +91,22 @@ SCRIPTURE_REF_PATTERN = re.compile(
     r"\b((?:[123]\s)?[A-Z][a-z]+\s+\d+:\d+(?:-\d+)?)\b"
 )
 
+SERMON_LINK_PATTERN = re.compile(r"/sermon/[^/?#]+$")
+SITE_ROOT = "https://www.abfboone.com"
+
+
+def _absolutize(href: str) -> str:
+    return SITE_ROOT + href if href.startswith("/") else href
+
+
+def _date_from_card(card) -> tuple[str | None, "date | None"]:
+    """Find the first 'Month D, YYYY' date string within a listing card."""
+    for text in card.stripped_strings:
+        parsed = parse_sermon_date(text)
+        if parsed:
+            return text.strip(), parsed
+    return None, None
+
 
 def fetch_sermon_metadata(sermon_url: str) -> dict:
     """
@@ -110,6 +128,14 @@ def fetch_sermon_metadata(sermon_url: str) -> dict:
         date_match = DATE_PATTERN.search(page_text)
         date_str = date_match.group(1).strip() if date_match else None
         parsed_date = parse_sermon_date(date_str) if date_str else None
+        # Wix detail pages show the date without the legacy "| " prefix —
+        # fall back to scanning individual text lines.
+        if parsed_date is None:
+            for line in soup.stripped_strings:
+                parsed_date = parse_sermon_date(line)
+                if parsed_date:
+                    date_str = line.strip()
+                    break
 
         # Look for a scripture reference in the first 2000 chars of body text
         early_text = page_text[:2000]
@@ -123,47 +149,127 @@ def fetch_sermon_metadata(sermon_url: str) -> dict:
 
 
 def fetch_sermon_index() -> list[dict]:
+    """
+    Parse the ABF sermons listing (Wix-hosted as of 2026-05).
+
+    Primary path: each sermon is a `div.wixui-repeater__item` card carrying the
+    title (<h3>), the "/sermon/<slug>" detail link, and a date line — all in the
+    static HTML, newest-first. Empty placeholder cards are skipped.
+
+    If the Wix card markup is absent (future site change), fall back to a generic
+    scan that pairs scripture-titled <h3> headings with "/sermon/" links by order.
+    """
     response = requests.get(INDEX_URL, timeout=15)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
+
     sermons = []
-
-    for h3 in soup.find_all("h3"):
-        a = h3.find("a")
-        if not a:
+    for card in soup.select("div.wixui-repeater__item"):
+        h3 = card.find("h3")
+        title = h3.get_text(strip=True) if h3 else ""
+        if not title:
             continue
 
-        title = a.get_text(strip=True)
-        url = a.get("href", "")
-
-        if "abfboone.com" not in url:
+        link = None
+        for a in card.find_all("a", href=True):
+            if SERMON_LINK_PATTERN.search(a["href"]):
+                link = _absolutize(a["href"])
+                break
+        if not link:
             continue
 
+        date_str, parsed_date = _date_from_card(card)
         passage = extract_passage_from_title(title)
 
-        # The sermons listing page carries no date metadata — fetch from individual page.
-        # Also resolve passage if the title doesn't contain a scripture reference
-        # (e.g. "PALM SUNDAY 2026").
-        if passage is None:
-            meta = fetch_sermon_metadata(url)
-            date_str = meta["date_str"]
-            parsed_date = meta["date"]
-            passage = meta["passage"]
-        else:
-            # Still need the date — fetch it from the individual page
-            meta = fetch_sermon_metadata(url)
-            date_str = meta["date_str"]
-            parsed_date = meta["date"]
+        # Only hit the detail page if the card was missing passage or date.
+        if passage is None or parsed_date is None:
+            meta = fetch_sermon_metadata(link)
+            passage = passage or meta["passage"]
+            date_str = date_str or meta["date_str"]
+            parsed_date = parsed_date or meta["date"]
 
         sermons.append({
             "title": title,
-            "url": url,
+            "url": link,
             "date_str": date_str,
             "date": parsed_date,
             "passage": passage,
         })
 
+    if sermons:
+        return sermons
+
+    return _fetch_sermon_index_fallback(soup)
+
+
+def _fetch_sermon_index_fallback(soup) -> list[dict]:
+    """Defensive fallback: pair scripture-titled <h3> headings with /sermon/ links."""
+    sermon_links, seen = [], set()
+    for a in soup.find_all("a", href=True):
+        if SERMON_LINK_PATTERN.search(a["href"]) and a["href"] not in seen:
+            seen.add(a["href"])
+            sermon_links.append(_absolutize(a["href"]))
+
+    titles = [
+        t for t in (h3.get_text(strip=True) for h3 in soup.find_all("h3"))
+        if extract_passage_from_title(t)
+    ]
+
+    sermons = []
+    for i, title in enumerate(titles):
+        if i >= len(sermon_links):
+            break
+        meta = fetch_sermon_metadata(sermon_links[i])
+        sermons.append({
+            "title": title,
+            "url": sermon_links[i],
+            "date_str": meta["date_str"],
+            "date": meta["date"],
+            "passage": extract_passage_from_title(title) or meta["passage"],
+        })
     return sermons
+
+
+def detect_passage_from_obsidian() -> str | None:
+    """
+    Fallback: scan recent Drop Zone processed files and KB bible-study notes
+    for a scripture passage reference written within the last 7 days.
+    Returns the most-recently-dated passage found, or None.
+    """
+    from datetime import date, timedelta
+
+    search_dirs = [
+        Path.home() / ".chief-of-staff" / "obsidian-repo" / "Drop Zone" / "processed",
+        Path.home() / "chief-of-staff" / "knowledge-base" / "personal" / "bible-study",
+    ]
+
+    cutoff = date.today() - timedelta(days=7)
+    candidates = []
+
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for md_file in sorted(search_dir.glob("*.md"), reverse=True):
+            try:
+                mtime = date.fromtimestamp(md_file.stat().st_mtime)
+                if mtime < cutoff:
+                    continue
+                content = md_file.read_text(encoding="utf-8", errors="ignore")
+                # Look for scripture references: Book Chapter:Verse or Book Chapter:Verse-Verse
+                for match in SCRIPTURE_REF_PATTERN.finditer(content):
+                    ref = match.group(1).strip()
+                    # Exclude obviously non-scripture refs (short refs like "v3" or single numbers)
+                    if re.match(r"[A-Z][a-z]", ref) and ":" in ref:
+                        candidates.append((mtime, ref))
+            except Exception:
+                continue
+
+    if not candidates:
+        return None
+
+    # Return the passage from the most recent note
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
 
 
 def fetch_sermon_transcript(sermon_url: str) -> str:
@@ -260,7 +366,20 @@ def run(notify_telegram=None) -> dict:
     state = load_state()
     latest_date_iso = latest["date"].isoformat() if latest["date"] else None
     if state.get("sermon_date") == latest_date_iso:
-        print(f"[sermon_fetcher] Already have sermon from {latest['date_str']}. Nothing to do.")
+        print(f"[sermon_fetcher] Already have sermon from {latest['date_str']}. Checking Obsidian notes for new passage...")
+        # Fallback: detect passage from recent Obsidian/KB notes (e.g. user took notes at church)
+        obs_passage = detect_passage_from_obsidian()
+        current_passage = state.get("active_passage", "")
+        if obs_passage and obs_passage != current_passage:
+            set_active_passage(obs_passage)
+            msg = (
+                f"📖 No new sermon on site yet, but detected new passage from your notes: "
+                f"*{obs_passage}*\nDevotions will use this passage starting tomorrow."
+            )
+            print(f"[sermon_fetcher] {msg}")
+            if notify_telegram:
+                notify_telegram(msg)
+            return {"found": False, "reason": "passage_from_notes", "passage": obs_passage}
         return {"found": False, "reason": "already_fetched"}
 
     # ── Step 3: Fetch transcript ──────────────────────────────────────────────
@@ -300,49 +419,31 @@ def run(notify_telegram=None) -> dict:
 
     set_sermon_fetched(sermon_date.isoformat(), filepath)
 
-    # ── Step 5: Run Phase 1 automatically ────────────────────────────────────
+    # ── Step 5: Kick the Logos weekly batch (CC produces Phase 1 + 6 devotions) ──
+    # Phase 1 must remain unbiased (no sermon input) — the CC command honours that.
+    # Phase 2 + Phase 3 are gated on-command ("write the journal entry").
     if passage:
-        if notify_telegram:
-            notify_telegram(f"📖 Sermon loaded for *{passage}*. Running Phase 1 exegetical study...")
-
-        print(f"[sermon_fetcher] Running Phase 1 for {passage}...")
-        try:
-            from study_session import run_phase1
-            phase1_output = run_phase1()
-            print(f"[sermon_fetcher] Phase 1 complete ({len(phase1_output)} chars).")
-        except Exception as e:
-            msg = f"⚠️ Phase 1 failed: {e}"
-            print(msg)
-            if notify_telegram:
-                notify_telegram(msg)
-            return {"found": True, "passage": passage, "error": f"Phase 1 failed: {e}"}
-
-        # ── Step 6: Run Phase 2 automatically ────────────────────────────────
-        print(f"[sermon_fetcher] Running Phase 2 sermon analysis...")
-        try:
-            from study_session import run_phase2
-            phase2_output = run_phase2()
-            print(f"[sermon_fetcher] Phase 2 complete ({len(phase2_output)} chars).")
-        except Exception as e:
-            msg = f"⚠️ Phase 2 failed: {e}"
-            print(msg)
-            if notify_telegram:
-                notify_telegram(msg)
-            return {"found": True, "passage": passage, "error": f"Phase 2 failed: {e}"}
-
-        # ── Step 7: Final notification ────────────────────────────────────────
         word_count = len(transcript.split())
-        summary_msg = (
-            f"✅ *Weekly study ready — {passage}*\n\n"
-            f"Pastor Scott Andrews | {latest['date_str']}\n"
-            f"Sermon: {word_count:,} words\n\n"
-            f"Phase 1 exegetical study: complete\n"
-            f"Phase 2 sermon analysis: complete\n\n"
-            f"When you're ready, just say *\"write the journal entry\"* to run Phase 3."
-        )
-        print(summary_msg)
         if notify_telegram:
-            notify_telegram(summary_msg)
+            notify_telegram(
+                f"📖 Sermon loaded for *{passage}* — Pastor Scott Andrews | "
+                f"{latest['date_str']} | {word_count:,} words.\n\n"
+                f"Kicking the Logos weekly batch (Phase 1 + Mon–Sat devotions). "
+                f"I'll let you know when the week is ready."
+            )
+        try:
+            import subprocess
+            subprocess.Popen(
+                ["/home/daniel/chief-of-staff/run_logos_week.sh", passage],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            print(f"[sermon_fetcher] Logos weekly batch kicked for {passage}.")
+        except Exception as e:
+            msg = f"⚠️ Could not launch logos-week batch: {e}"
+            print(msg)
+            if notify_telegram:
+                notify_telegram(msg)
 
     return {
         "found": True,
