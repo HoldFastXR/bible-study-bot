@@ -237,10 +237,20 @@ async def _await_cc_run(script: str, *args: str, timeout: int = 900) -> tuple[in
     return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
 
-async def send_html_file(chat_id: str, path: Path, caption: str):
-    """Send a pre-rendered HTML document via Telegram, with text fallback."""
+async def send_html_file(chat_id: str, path: Path, caption: str,
+                         display_name: str | None = None):
+    """Send a pre-rendered HTML document via Telegram, with text fallback.
+
+    `display_name` overrides the filename shown in the Telegram chat without
+    renaming the file on disk (e.g. "1. Exegetical Study of Luke 16:16-18").
+    """
     try:
-        await bot.send_document(chat_id, FSInputFile(str(path)), caption=caption)
+        filename = display_name or path.name
+        if not filename.lower().endswith(".html"):
+            filename = f"{filename}.html"
+        await bot.send_document(
+            chat_id, FSInputFile(str(path), filename=filename), caption=caption,
+        )
     except Exception as e:
         log.error(f"send_document failed for {path}: {e}")
         await bot.send_message(chat_id, f"⚠️ Could not send {path.name}: {e}")
@@ -307,7 +317,8 @@ async def handle_run_phase1(message: Message):
     if html.exists() and logos_io.passage_matches(passage):
         await send_html_file(
             str(message.chat.id), html,
-            caption=f"📖 Phase 1 — exegetical study of {passage}."
+            caption=f"📖 Phase 1 — exegetical study of {passage}.",
+            display_name=f"1. Exegetical Study of {passage}",
         )
         return
 
@@ -373,7 +384,8 @@ async def handle_run_phase3(message: Message):
         return
     await send_html_file(
         str(message.chat.id), html,
-        caption=f"📓 Phase 3 — journal synthesis for {passage}."
+        caption=f"📓 Phase 3 — journal synthesis for {passage}.",
+        display_name=f"3. Journal Synthesis for {passage}",
     )
     await message.answer("✅ Study saved to knowledge base.", parse_mode="Markdown")
 
@@ -407,9 +419,17 @@ async def handle_side_study(message: Message, passage: str):
     p1 = out_dir / "phase1.html"
     p3 = out_dir / "phase3.html"
     if p1.exists():
-        await send_html_file(chat_id, p1, caption=f"📖 Phase 1 — side study of {passage}.")
+        await send_html_file(
+            chat_id, p1,
+            caption=f"📖 Phase 1 — side study of {passage}.",
+            display_name=f"1. Exegetical Study of {passage}",
+        )
     if p3.exists():
-        await send_html_file(chat_id, p3, caption=f"📓 Phase 3 — synthesis for {passage}.")
+        await send_html_file(
+            chat_id, p3,
+            caption=f"📓 Phase 3 — synthesis for {passage}.",
+            display_name=f"3. Journal Synthesis for {passage}",
+        )
     await message.answer(
         f"Side study complete for *{passage}*. Say *save this study* to log it to the "
         f"knowledge base.",
@@ -431,8 +451,11 @@ async def handle_side_journal(message: Message):
     passage = side_study_session.get("passage", "passage")
     p3 = Path(out_dir) / "phase3.html"
     if p3.exists():
-        await send_html_file(str(message.chat.id), p3,
-                             caption=f"📓 Phase 3 — synthesis for {passage}.")
+        await send_html_file(
+            str(message.chat.id), p3,
+            caption=f"📓 Phase 3 — synthesis for {passage}.",
+            display_name=f"3. Journal Synthesis for {passage}",
+        )
     else:
         await message.answer(
             "Phase 3 wasn't produced for that side study (unexpected). "
