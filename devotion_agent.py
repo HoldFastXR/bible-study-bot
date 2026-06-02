@@ -209,7 +209,17 @@ def _assemble_devotion(passage: str, body: str) -> str:
 
 
 def _load_pregenerated_devotion(passage: str) -> str | None:
-    """Read today's pre-generated devotion markdown from the Logos batch, if any."""
+    """Read today's pre-generated devotion markdown from the Logos batch, if any.
+
+    Only use it when the batch was generated for the currently-active passage —
+    a stale batch from a prior passage must not be served as today's devotion.
+    """
+    if not logos_io.passage_matches(passage):
+        mp = logos_io.manifest_passage()
+        if mp:
+            print(f"[devotion] Batch passage ({mp}) != active passage ({passage}); "
+                  "skipping pre-generated and falling back to live generation.")
+        return None
     body = logos_io.read_devo_md_for_today()
     if not body:
         return None

@@ -28,6 +28,9 @@ ATTRIBUTION = (
     "Good News Publishers. Used by permission. All rights reserved."
 )
 
+# Compact attribution for personal-use HTML where the full notice is overkill.
+SHORT_ATTRIBUTION = "ESV® · © Crossway"
+
 
 def _cache_path(passage: str) -> Path:
     slug = re.sub(r"[^a-z0-9]+", "-", passage.lower()).strip("-") or "passage"

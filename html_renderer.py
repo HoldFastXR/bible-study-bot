@@ -21,7 +21,7 @@ import os
 import re
 from pathlib import Path
 
-from esv_client import ATTRIBUTION as ESV_ATTRIBUTION
+from esv_client import SHORT_ATTRIBUTION as ESV_ATTRIBUTION
 
 RENDERED_DIR = Path(__file__).parent / "rendered"
 

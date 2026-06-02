@@ -299,16 +299,19 @@ async def handle_run_phase1(message: Message):
         )
         return
 
-    # Prefer the pre-generated Phase 1 HTML from this week's Logos batch.
+    # Prefer the pre-generated Phase 1 HTML from this week's Logos batch — but
+    # only if the batch was generated for the currently-active passage. If the
+    # manifest passage doesn't match, the batch is stale; fall through and kick
+    # a fresh one rather than serve content from a different week's passage.
     html = logos_io.phase_path("phase1", "html")
-    if html.exists():
+    if html.exists() and logos_io.passage_matches(passage):
         await send_html_file(
             str(message.chat.id), html,
             caption=f"📖 Phase 1 — exegetical study of {passage}."
         )
         return
 
-    # Not generated yet — kick the batch and tell Daniel.
+    # Not generated for this passage yet — kick the batch and tell Daniel.
     kicked = _kick_cc_detached(LOGOS_WEEK_SCRIPT, passage)
     if kicked:
         await message.answer(
@@ -339,18 +342,19 @@ async def handle_run_phase3(message: Message):
         return
 
     html = logos_io.phase_path("phase3", "html")
-    if html.exists():
+    if html.exists() and logos_io.passage_matches(passage):
         await send_html_file(
             str(message.chat.id), html,
             caption=f"📓 Phase 3 — journal synthesis for {passage}."
         )
         return
 
-    # Need to run /logos-journal — sermon transcript must be available, Phase 1 must exist.
-    if not logos_io.phase_path("phase1", "md").exists():
+    # Need to run /logos-journal. Phase 1 must exist AND match the active passage —
+    # otherwise the journal would build on stale exegesis.
+    if not logos_io.phase_path("phase1", "md").exists() or not logos_io.passage_matches(passage):
         await message.answer(
-            "⚠️ Phase 1 hasn't been generated yet for this week. "
-            "Set the passage (or wait for Sunday's sermon fetch) — that kicks Phase 1.",
+            "⚠️ Phase 1 for the current passage isn't ready yet. "
+            "Re-set the passage to kick a fresh weekly batch, then try again.",
             parse_mode="Markdown"
         )
         return

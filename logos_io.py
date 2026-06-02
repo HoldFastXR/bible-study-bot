@@ -53,6 +53,19 @@ def phase_path(phase: str, fmt: str = "html", d: datetime.date | None = None) ->
     return week_dir(d) / f"{phase}.{fmt}"
 
 
+def manifest_passage(d: datetime.date | None = None) -> str | None:
+    m = load_manifest(d)
+    return m.get("passage") if m else None
+
+
+def passage_matches(active: str | None, d: datetime.date | None = None) -> bool:
+    """True when the batch on disk was generated for the current active passage."""
+    if not active:
+        return False
+    mp = manifest_passage(d)
+    return bool(mp) and mp.strip().lower() == active.strip().lower()
+
+
 def has_devo_for_today(d: datetime.date | None = None) -> bool:
     today = d or datetime.date.today()
     return devo_path(today.weekday(), "html", today).exists() or \
