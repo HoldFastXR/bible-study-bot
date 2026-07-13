@@ -200,6 +200,42 @@ def send_telegram_devotion_html(devotion: str, passage: str, angle_name: str,
         return False
 
 
+def _read_logged_devotion(today: datetime.date) -> str | None:
+    """Return the exact devotion text already generated/sent today (from its log
+    file), so the on-demand HTML attachment matches what was received."""
+    path = LOGS_DIR / f"devotion_{today.strftime('%Y-%m-%d')}.txt"
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    parts = re.split(r"\n=+\n", raw, maxsplit=1)
+    body = (parts[1] if len(parts) == 2 else raw).strip()
+    return body or None
+
+
+def deliver_todays_devotion_html() -> bool:
+    """On-demand: send today's devotion as a Logos-styled HTML attachment for easy
+    forwarding. Prefers the devotion already sent today (so the file matches what
+    was received), else the pre-generated batch, else a fresh generation. Presentation
+    only — does NOT send email, write the KB, or touch the sent-today flag."""
+    passage = get_active_passage()
+    if not passage:
+        print("[devotion] No active passage — cannot build on-demand HTML devotion.")
+        return False
+    today = datetime.date.today()
+    angle_name, _ = get_today_angle()
+    devotion = _read_logged_devotion(today) or _load_pregenerated_devotion(passage)
+    if devotion is None:
+        try:
+            devotion = generate_devotion(passage)
+        except Exception as e:
+            print(f"[devotion] on-demand HTML generation failed: {e}")
+            return False
+    return send_telegram_devotion_html(devotion, passage, angle_name, today)
+
+
 def send_email_broadcast(subject: str, body: str, subscribers: list[str]):
     """Send devotion to email subscriber list via Gmail SMTP."""
     if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
@@ -329,11 +365,10 @@ def run(force: bool = False):
     email_body += "\n\n—\nAlliance Bible Fellowship Boone | Daily Devotion"
     email_body += f"\n\n{ESV_ATTRIBUTION}"
 
-    # Send — Logos-styled HTML attachment, with plain-text as the fallback so a
-    # render/send failure never silently drops the day's devotion.
-    if not send_telegram_devotion_html(devotion, passage, angle_name, today):
-        print("[devotion] HTML devotion unavailable — falling back to plain text.")
-        send_telegram(telegram_message)
+    # Send — the scheduled daily devotion is a plain Telegram message (default).
+    # An HTML attachment is available on demand via the bot ("send it as HTML"),
+    # for easy forwarding — see send_telegram_devotion_html / deliver_todays_devotion_html.
+    send_telegram(telegram_message)
     subscribers = load_subscribers()
     send_email_broadcast(subject, email_body, subscribers)
 

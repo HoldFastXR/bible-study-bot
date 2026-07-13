@@ -34,7 +34,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import FSInputFile, Message
 from dotenv import load_dotenv
 
-from devotion_agent import run as run_devotion
+from devotion_agent import run as run_devotion, deliver_todays_devotion_html
 from esv_client import get_passage_text
 from gemini_client import generate_with_history
 from html_renderer import write_study_html
@@ -84,6 +84,18 @@ pending_clarification: dict = {
     "active": False,
     "passage": None,
 }
+
+
+# Modifiers that mean "send today's devotion as a forwardable HTML file"
+# rather than the default inline plain-text message.
+_HTML_DEVOTION_RE = re.compile(
+    r"\b(html|attachment|attach|as a file|as a doc|document|forward|share|pdf)\b",
+    re.IGNORECASE,
+)
+
+
+def _wants_html_devotion(text: str) -> bool:
+    return bool(text and _HTML_DEVOTION_RE.search(text))
 
 
 # ── Intent Classifier ─────────────────────────────────────────────────────────
@@ -662,8 +674,18 @@ async def handle_message(message: Message):
         await handle_save_study(message)
 
     elif intent == "DEVOTION":
-        await message.answer("📖 Generating today's devotion...", parse_mode="Markdown")
-        await loop.run_in_executor(None, lambda: run_devotion(force=True))
+        if _wants_html_devotion(text):
+            await message.answer("📖 Rendering today's devotion as an HTML attachment...", parse_mode="Markdown")
+            ok = await loop.run_in_executor(None, deliver_todays_devotion_html)
+            if not ok:
+                await message.answer(
+                    "⚠️ Couldn't build the HTML devotion. Ask for it as plain text, "
+                    "or set this week's passage first if it isn't set.",
+                    parse_mode="Markdown",
+                )
+        else:
+            await message.answer("📖 Generating today's devotion...", parse_mode="Markdown")
+            await loop.run_in_executor(None, lambda: run_devotion(force=True))
 
     elif intent == "STATUS":
         await message.answer(get_status_message(), parse_mode="Markdown")
