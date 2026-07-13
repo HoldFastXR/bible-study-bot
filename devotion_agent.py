@@ -148,6 +148,58 @@ def send_telegram(message: str):
             print(f"[devotion] Telegram send error: {e}")
 
 
+_BOLD_HEADER_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
+
+
+def _promote_section_headers(md: str) -> str:
+    """The devotion uses standalone **Bold** lines as section headers
+    (Scripture / angle / Application / Prayer). Promote those to `## ` so the
+    Logos HTML template renders them as real headings, not inline bold text.
+    A presentation-only transform — the source markdown is untouched."""
+    out = []
+    for line in md.split("\n"):
+        m = _BOLD_HEADER_RE.match(line)
+        out.append(f"## {m.group(1).strip()}" if m else line)
+    return "\n".join(out)
+
+
+def send_telegram_devotion_html(devotion: str, passage: str, angle_name: str,
+                                today: datetime.date) -> bool:
+    """Render the devotion as a Logos-styled HTML doc and send it as a Telegram
+    document attachment. Returns True on success, False on any failure so the
+    caller can fall back to plain-text delivery. Reuses html_renderer's template
+    (Charter/Georgia web-safe serif, light+dark) — no self-hosted fonts, so it
+    renders correctly opened cold on a phone."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("[devotion] Telegram credentials not set — skipping HTML send.")
+        return False
+    try:
+        from html_renderer import write_study_html
+        title = f"Morning Devotion — {today.strftime('%A')}"
+        subtitle = f"{today.strftime('%B %d, %Y')} · {passage} · {angle_name}"
+        slug = f"devotion-{today.strftime('%Y%m%d')}"
+        path = write_study_html(
+            title, subtitle, _promote_section_headers(devotion), slug
+        )
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+        caption = f"📖 Morning Devotion — {today.strftime('%A, %B %d')} · {angle_name}"
+        with open(path, "rb") as fh:
+            resp = requests.post(
+                url,
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
+                files={"document": (f"{slug}.html", fh, "text/html")},
+                timeout=30,
+            )
+        if resp.ok:
+            print(f"[devotion] Telegram HTML devotion sent ({path}).")
+            return True
+        print(f"[devotion] Telegram sendDocument failed: {resp.status_code} {resp.text[:300]}")
+        return False
+    except Exception as e:
+        print(f"[devotion] HTML devotion send error: {e}")
+        return False
+
+
 def send_email_broadcast(subject: str, body: str, subscribers: list[str]):
     """Send devotion to email subscriber list via Gmail SMTP."""
     if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
@@ -277,8 +329,11 @@ def run(force: bool = False):
     email_body += "\n\n—\nAlliance Bible Fellowship Boone | Daily Devotion"
     email_body += f"\n\n{ESV_ATTRIBUTION}"
 
-    # Send
-    send_telegram(telegram_message)
+    # Send — Logos-styled HTML attachment, with plain-text as the fallback so a
+    # render/send failure never silently drops the day's devotion.
+    if not send_telegram_devotion_html(devotion, passage, angle_name, today):
+        print("[devotion] HTML devotion unavailable — falling back to plain text.")
+        send_telegram(telegram_message)
     subscribers = load_subscribers()
     send_email_broadcast(subject, email_body, subscribers)
 
