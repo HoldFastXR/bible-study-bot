@@ -181,6 +181,14 @@ def _declutter_devotion_body(md: str) -> str:
     return "\n".join(keep)
 
 
+def _devotion_filename(passage: str, angle_name: str) -> str:
+    """A human-readable attachment name from the passage + the day's angle,
+    e.g. 'Luke-17.7-10-Observation.html' — not a date/number string."""
+    base = f"{passage} {angle_name}".replace(":", ".")
+    slug = re.sub(r"[^A-Za-z0-9.\-]+", "-", base).strip("-.")
+    return f"{slug or 'devotion'}.html"
+
+
 def _prepare_devotion_html(devotion: str, passage: str):
     """Split the ESV scripture out of the devotion (so it renders in the template's
     illuminated block) and return (scripture_text, body_markdown). The body is
@@ -215,16 +223,16 @@ def send_telegram_devotion_html(devotion: str, passage: str, angle_name: str,
         from html_renderer import write_study_html
         title = f"Morning Devotion — {today.strftime('%A')}"
         subtitle = f"{today.strftime('%B %d, %Y')} · {passage} · {angle_name}"
-        slug = f"devotion-{today.strftime('%Y%m%d')}"
         scripture_text, body_md = _prepare_devotion_html(devotion, passage)
-        path = write_study_html(title, subtitle, body_md, slug, scripture=scripture_text)
+        fname = _devotion_filename(passage, angle_name)
+        path = write_study_html(title, subtitle, body_md, fname[:-5], scripture=scripture_text)
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
         caption = f"📖 Morning Devotion — {today.strftime('%A, %B %d')} · {angle_name}"
         with open(path, "rb") as fh:
             resp = requests.post(
                 url,
                 data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
-                files={"document": (f"{slug}.html", fh, "text/html")},
+                files={"document": (fname, fh, "text/html")},
                 timeout=30,
             )
         if resp.ok:
