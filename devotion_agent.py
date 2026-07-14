@@ -163,6 +163,44 @@ def _promote_section_headers(md: str) -> str:
     return "\n".join(out)
 
 
+def _declutter_devotion_body(md: str) -> str:
+    """Strip the batch's redundant day/passage header lines and rule cruft — the
+    styled template already shows day, passage, and angle in its masthead."""
+    keep = []
+    for line in md.split("\n"):
+        s = line.strip()
+        if re.match(r"^#\s", s):                    # "# Monday — Observation"
+            continue
+        if re.match(r"^##\s.*(?:Week|\|)", s):       # "## Luke 17:7–10 | Week 2026-W29"
+            continue
+        if re.match(r"^-{3,}$", s):                  # "---" rule
+            continue
+        if re.match(r"^\*\*Scripture\*\*$", s):      # residual scripture label
+            continue
+        keep.append(line)
+    return "\n".join(keep)
+
+
+def _prepare_devotion_html(devotion: str, passage: str):
+    """Split the ESV scripture out of the devotion (so it renders in the template's
+    illuminated block) and return (scripture_text, body_markdown). The body is
+    decluttered and its section headers promoted to '## '. Presentation only."""
+    try:
+        esv = get_passage_text(passage) or ""
+    except Exception:
+        esv = ""
+    scripture_text = None
+    body = devotion
+    if esv and esv in devotion:
+        scripture_text = esv
+        body = devotion.split(esv, 1)[1]
+    else:
+        # esv unavailable / didn't match — drop just the leading **Scripture** label
+        body = re.sub(r"^\s*\*\*Scripture\*\*.*?\n\n", "", devotion, count=1, flags=re.DOTALL)
+    body = _promote_section_headers(_declutter_devotion_body(body)).strip()
+    return scripture_text, body
+
+
 def send_telegram_devotion_html(devotion: str, passage: str, angle_name: str,
                                 today: datetime.date) -> bool:
     """Render the devotion as a Logos-styled HTML doc and send it as a Telegram
@@ -178,9 +216,8 @@ def send_telegram_devotion_html(devotion: str, passage: str, angle_name: str,
         title = f"Morning Devotion — {today.strftime('%A')}"
         subtitle = f"{today.strftime('%B %d, %Y')} · {passage} · {angle_name}"
         slug = f"devotion-{today.strftime('%Y%m%d')}"
-        path = write_study_html(
-            title, subtitle, _promote_section_headers(devotion), slug
-        )
+        scripture_text, body_md = _prepare_devotion_html(devotion, passage)
+        path = write_study_html(title, subtitle, body_md, slug, scripture=scripture_text)
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
         caption = f"📖 Morning Devotion — {today.strftime('%A, %B %d')} · {angle_name}"
         with open(path, "rb") as fh:

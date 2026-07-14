@@ -25,6 +25,29 @@ from esv_client import SHORT_ATTRIBUTION as ESV_ATTRIBUTION
 
 RENDERED_DIR = Path(__file__).parent / "rendered"
 
+# Illuminated olive-sprig line art (inherits the accent via currentColor).
+SPRIG = (
+    '<svg class="sprig" width="132" height="34" viewBox="0 0 132 34" fill="none" aria-hidden="true">'
+    '<path d="M66 31 C66 22 66 14 66 6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>'
+    '<path d="M66 9 C58 7 52 9 48 4 C55 3 62 5 66 9Z" fill="currentColor" opacity=".85"/>'
+    '<path d="M66 9 C74 7 80 9 84 4 C77 3 70 5 66 9Z" fill="currentColor" opacity=".85"/>'
+    '<path d="M66 16 C57 15 50 17 45 12 C53 10 61 12 66 16Z" fill="currentColor" opacity=".7"/>'
+    '<path d="M66 16 C75 15 82 17 87 12 C79 10 71 12 66 16Z" fill="currentColor" opacity=".7"/>'
+    '<path d="M66 23 C59 22 53 24 49 20 C56 18 62 20 66 23Z" fill="currentColor" opacity=".55"/>'
+    '<path d="M66 23 C73 22 79 24 83 20 C76 18 70 20 66 23Z" fill="currentColor" opacity=".55"/>'
+    '<circle cx="66" cy="4" r="2.1" fill="currentColor"/>'
+    '<path d="M30 24 C40 22 48 24 54 27" stroke="currentColor" stroke-width=".8" opacity=".5" stroke-linecap="round"/>'
+    '<path d="M102 24 C92 22 84 24 78 27" stroke="currentColor" stroke-width=".8" opacity=".5" stroke-linecap="round"/>'
+    "</svg>"
+)
+SPRIG_SM = (
+    '<svg class="sprig" width="70" height="16" viewBox="0 0 70 16" fill="none" aria-hidden="true">'
+    '<path d="M35 14 C35 9 35 5 35 2" stroke="currentColor" stroke-width=".9" stroke-linecap="round"/>'
+    '<path d="M35 5 C30 4 26 5 23 2 C28 1 33 3 35 5Z" fill="currentColor" opacity=".8"/>'
+    '<path d="M35 5 C40 4 44 5 47 2 C42 1 37 3 35 5Z" fill="currentColor" opacity=".8"/>'
+    "</svg>"
+)
+
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _ITALIC_RE = re.compile(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)")
 _ORDERED_RE = re.compile(r"^(\s*)(\d+)\.\s+(.*)$")
@@ -79,7 +102,7 @@ def markdown_to_html_fragment(md: str) -> str:
         if _RULE_RE.match(line):
             flush_para()
             close_all_lists()
-            out.append("<hr/>")
+            out.append('<p class="fleuron">❧</p>')
             continue
 
         heading = _HEADING_RE.match(line)
@@ -134,56 +157,80 @@ _TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>{title}</title>
 <style>
-  :root {{ color-scheme: light dark; }}
+  :root {{
+    color-scheme: light dark;
+    /* dark (default) — cool slate, dusty-terracotta accent */
+    --bg-top:#181B20; --bg-bot:#101216;
+    --text:#E4E3DD; --soft:#A6A79F;
+    --accent:#BC8B6C; --line:#2B2F37; --rule:#3A3F49; --panel:#1C2026;
+  }}
+  @media (prefers-color-scheme: light) {{
+    :root {{
+      /* light — warm parchment, deeper terracotta for contrast */
+      --bg-top:#FBFAF5; --bg-bot:#F1EDE2;
+      --text:#282420; --soft:#6E685B;
+      --accent:#A66B49; --line:#E3DCCC; --rule:#D8CFBB; --panel:#F2EDE0;
+    }}
+  }}
+  * {{ box-sizing:border-box; margin:0; padding:0; }}
   body {{
-    font-family: Charter, Georgia, "Times New Roman", serif;
-    line-height: 1.6; font-size: 18px; color: #1a1a1a;
-    background: #fbfbf8; margin: 0; padding: 2rem 1.25rem 4rem;
+    background: linear-gradient(180deg,var(--bg-top),var(--bg-bot)) no-repeat;
+    background-attachment: fixed; min-height:100vh;
+    color: var(--text);
+    font-family: Charter,"Iowan Old Style",Georgia,"Times New Roman",serif;
+    line-height:1.62; font-size:18px;
+    padding: 32px 16px 72px; -webkit-text-size-adjust:100%;
   }}
-  .wrap {{ max-width: 720px; margin: 0 auto; }}
-  header.doc {{ border-bottom: 2px solid #d8d2c4; padding-bottom: 1rem; margin-bottom: 2rem; }}
-  header.doc .kicker {{ font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase;
-    color: #8a7f66; margin: 0 0 0.4rem; }}
-  header.doc h1 {{ font-size: 1.7rem; line-height: 1.25; margin: 0 0 0.3rem; }}
-  header.doc .sub {{ color: #5c5645; font-style: italic; margin: 0; }}
-  h2 {{ font-size: 1.35rem; margin: 2.2rem 0 0.6rem; padding-bottom: 0.25rem;
-    border-bottom: 1px solid #e6e0d2; }}
-  h3 {{ font-size: 1.12rem; margin: 1.6rem 0 0.4rem; color: #2a2a2a; }}
-  h4 {{ font-size: 1rem; margin: 1.2rem 0 0.3rem; color: #4a4a4a; }}
-  p {{ margin: 0.7rem 0; }}
-  ul, ol {{ margin: 0.6rem 0; padding-left: 1.5rem; }}
-  li {{ margin: 0.3rem 0; }}
-  section.scripture {{ background: #f3efe3; border-left: 3px solid #c9bd9c;
-    padding: 1rem 1.25rem; margin: 0 0 2rem; border-radius: 4px; }}
-  section.scripture .passage {{ font-size: 0.97rem; line-height: 1.7; }}
-  section.scripture .attribution {{ font-size: 0.72rem; color: #8a7f66;
-    margin: 0.9rem 0 0; }}
-  hr {{ border: none; border-top: 1px solid #e0dacc; margin: 2rem 0; }}
-  strong {{ color: #111; }}
-  em {{ color: #3a3a3a; }}
-  footer.doc {{ margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #e6e0d2;
-    font-size: 0.8rem; color: #9a917c; }}
-  @media (prefers-color-scheme: dark) {{
-    body {{ background: #15140f; color: #e6e2d6; }}
-    header.doc .kicker {{ color: #b3a988; }}
-    header.doc .sub {{ color: #b8b29c; }}
-    h2 {{ border-color: #33301f; }}
-    h3 {{ color: #ece8db; }}
-    strong {{ color: #fff; }}
-    section.scripture {{ background: #1f1d14; border-left-color: #4a4327; }}
-  }}
+  .wrap {{ max-width: 680px; margin:0 auto; }}
+  .sprig {{ color:var(--accent); display:block; margin:0 auto 12px; }}
+  header.doc {{ text-align:center; margin-bottom: 28px; }}
+  header.doc .kicker {{ font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:var(--accent); font-weight:600; }}
+  header.doc h1 {{ font-weight:600; font-size:clamp(1.7rem,6vw,2.1rem); line-height:1.15; margin:10px 0 4px; letter-spacing:.005em; }}
+  header.doc .sub {{ font-style:italic; color:var(--soft); font-size:1rem; }}
+  .drule {{ position:relative; height:10px; margin:20px auto 0; max-width:340px; }}
+  .drule::before,.drule::after {{ content:""; position:absolute; left:0; right:0; border-top:1px solid var(--rule); }}
+  .drule::before {{ top:3px; }} .drule::after {{ top:6px; }}
+  .drule span {{ position:absolute; top:0; left:50%; transform:translateX(-50%); background:var(--bg-top); padding:0 12px; color:var(--accent); font-size:12px; }}
+
+  section.scripture {{ background:var(--panel); border-left:2px solid var(--accent); border-radius:0 6px 6px 0; padding:16px 20px 14px; margin:0 0 30px; }}
+  section.scripture .lbl {{ font-size:10.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--accent); font-weight:600; display:block; margin-bottom:9px; }}
+  section.scripture .passage {{ font-size:1rem; line-height:1.7; }}
+  section.scripture .attribution {{ font-size:.7rem; color:var(--soft); margin:.85rem 0 0; }}
+
+  .doc-body h2 {{ font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--accent); font-weight:600; margin:30px 0 8px; display:flex; align-items:center; gap:10px; }}
+  .doc-body h2::after {{ content:""; flex:1; border-top:1px solid var(--line); }}
+  .doc-body h3 {{ font-size:1.15rem; font-weight:600; margin:24px 0 6px; }}
+  .doc-body h4 {{ font-size:1rem; font-weight:600; color:var(--soft); margin:18px 0 4px; }}
+  .doc-body p {{ font-size:1.06rem; margin:0 0 1.05em; }}
+  .doc-body ul,.doc-body ol {{ margin:.5rem 0 1rem 1.4rem; }}
+  .doc-body li {{ margin:.35rem 0; }}
+  .doc-body strong {{ font-weight:700; }}
+  .doc-body em {{ color:var(--soft); }}
+  .doc-body > p:first-of-type::first-letter {{ font-size:3.4em; line-height:.82; float:left; padding:6px 10px 0 0; color:var(--accent); font-family:Georgia,"Times New Roman",serif; font-weight:600; }}
+  p.fleuron {{ text-align:center; color:var(--accent); font-size:20px; margin:30px 0; letter-spacing:.3em; }}
+
+  footer.doc {{ text-align:center; margin-top:36px; padding-top:18px; border-top:1px solid var(--line); }}
+  footer.doc .sprig {{ margin-bottom:8px; }}
+  footer.doc p {{ font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--soft); }}
 </style>
 </head>
 <body>
 <div class="wrap">
 <header class="doc">
-  <p class="kicker">Logos · Bible Study</p>
+  {sprig}
+  <p class="kicker">Logos · Daily Reading</p>
   <h1>{title}</h1>
   <p class="sub">{subtitle}</p>
+  <div class="drule"><span>❧</span></div>
 </header>
 {scripture}
+<div class="doc-body">
 {body}
-<footer class="doc">Generated {generated} · Alliance Bible Fellowship, Boone</footer>
+</div>
+<footer class="doc">
+  {sprig_sm}
+  <p>Generated {generated} · Alliance Bible Fellowship, Boone</p>
+</footer>
 </div>
 </body>
 </html>
@@ -191,12 +238,13 @@ _TEMPLATE = """<!DOCTYPE html>
 
 
 def _scripture_section(scripture: str | None) -> str:
-    """Render an optional ESV passage block (shown above the study body)."""
+    """Render an optional ESV passage block (the illuminated scripture card)."""
     if not scripture:
         return ""
     safe = html.escape(scripture, quote=False).replace("\n", "<br/>\n")
     return (
         '<section class="scripture">\n'
+        '  <span class="lbl">Scripture</span>\n'
         f'  <div class="passage">{safe}</div>\n'
         f'  <p class="attribution">{html.escape(ESV_ATTRIBUTION, quote=False)}</p>\n'
         "</section>"
@@ -211,6 +259,8 @@ def render_study_html(title: str, subtitle: str, body_markdown: str,
         subtitle=html.escape(subtitle, quote=False),
         scripture=_scripture_section(scripture),
         body=markdown_to_html_fragment(body_markdown),
+        sprig=SPRIG,
+        sprig_sm=SPRIG_SM,
         generated=datetime.datetime.now().strftime("%B %d, %Y %H:%M"),
     )
 
