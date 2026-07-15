@@ -625,6 +625,37 @@ async def resolve_pending_clarification(message: Message, text: str) -> bool:
 
 # ── Main Message Handler ──────────────────────────────────────────────────────
 
+_DEEPDIVE_RE = re.compile(
+    r'(?i)^(?:make|create|generate|build|record|produce|do|give\s+me)?\s*(?:me\s+)?(?:a\s+|an\s+)?'
+    r'(?:deep[\s-]?dive|podcast(?:\s+episode)?|episode|audio\s+briefing)\s+'
+    r'(?:on|about|covering|into|re|of)\s+(.+)')
+_BARE_DEEPDIVE_RE = re.compile(r'(?i)^deep[\s-]?dive\s+(?:on|about|into)\s+(.+)')
+
+
+def _match_deepdive(text: str):
+    """Return (topic, tier) if this is a request to make a (theological) Deep Dive, else None."""
+    m = _DEEPDIVE_RE.match(text) or _BARE_DEEPDIVE_RE.match(text)
+    if not m:
+        return None
+    topic = m.group(1).strip().strip('.?!"“” ')
+    if not topic:
+        return None
+    tier = ("brief" if re.search(r'(?i)\b(brief|short|quick)\b', text)
+            else "deep" if re.search(r'(?i)\b(long|thorough|full|in.?depth)\b', text)
+            else "standard")
+    return topic, tier
+
+
+def _spawn_theology_deepdive(topic: str, tier: str) -> None:
+    """Launch the Logos theological Deep Dive generator detached (research + write + hand
+    off to the shared Deep Dives render/publish pipeline)."""
+    worker = str(Path(__file__).parent / "podcast_theology.py")
+    logf = open(os.path.expanduser("~/.cache/logos_deepdive_last.log"), "w")
+    subprocess.Popen([_sys.executable, worker, topic, tier],
+                     cwd=str(Path(__file__).parent),
+                     stdout=logf, stderr=subprocess.STDOUT, start_new_session=True)
+
+
 @dp.message()
 async def handle_message(message: Message):
     if not is_authorized(message):
@@ -639,6 +670,20 @@ async def handle_message(message: Message):
         handled = await resolve_pending_clarification(message, text)
         if handled:
             return
+
+    # Deep Dives (theological / Bible-adjacent) — Logos researches + writes with its own
+    # method, then hands off to the shared Deep Dives pipeline. Short-circuits the classifier.
+    dd = _match_deepdive(text)
+    if dd:
+        topic, tier = dd
+        await message.answer(
+            f"🎙️ On it — researching and writing a Deep Dive on “{topic}” through the Logos "
+            f"lens (Reformed, redemptive-historical, honest about what Scripture settles). "
+            f"Runs in the background: web research + a Kokoro render (~30–40 min for a short "
+            f"one). I'll publish it to your Deep Dives podcast — audio + full write-up — and ping you.",
+            parse_mode="Markdown")
+        _spawn_theology_deepdive(topic, tier)
+        return
 
     # Classify intent
     loop = asyncio.get_event_loop()
