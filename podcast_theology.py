@@ -40,13 +40,14 @@ script (the full spoken narration, paragraphs separated by blank lines, ear-writ
 """
 
 
-def _research(prompt: str, timeout: int = 900) -> str:
+def _research(prompt: str, model: str | None = None, timeout: int = 900) -> str:
     binary = CLAUDE_BIN if os.path.exists(CLAUDE_BIN) else "claude"
     scratch = HOME / ".cache" / "logos_podcast"
     scratch.mkdir(parents=True, exist_ok=True)
-    print(f"[logos-pod] researching + writing with model={MODEL}", flush=True)
+    mdl = model or MODEL
+    print(f"[logos-pod] researching + writing with model={mdl}", flush=True)
     proc = subprocess.run(
-        [binary, "-p", prompt, "--model", MODEL,
+        [binary, "-p", prompt, "--model", mdl,
          "--allowedTools", "WebSearch", "WebFetch", "--output-format", "json"],
         cwd=str(scratch), capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
@@ -64,20 +65,20 @@ def _extract_json(text: str) -> dict:
     return json.loads(m.group(0))
 
 
-def generate(topic: str, tier: str = "standard") -> None:
+def generate(topic: str, tier: str = "standard", model: str | None = None) -> None:
     spec = SPEC.read_text()
     length = {"brief": "8–10 minutes", "standard": "15–20 minutes",
               "deep": "25–30 minutes"}.get(tier, "15–20 minutes")
     system = (CHARTER_BASE + "\n\n" + LENS + f"\n\nTarget length: {length}.\n\n"
               "EPISODE SPEC (structure / length / ear-writing):\n" + spec)
     prompt = system + f"\n\nTopic: {topic}\n\nResearch the topic, then write the episode as JSON."
-    reply = _research(prompt)
+    reply = _research(prompt, model=model)
     data = _extract_json(reply)
     script = data.pop("script")
     data.setdefault("topic", topic)
     data["date"] = datetime.datetime.now().strftime("%B %d, %Y")
     data["date_iso"] = datetime.datetime.now().astimezone().isoformat()
-    data["model"] = f"Logos · {MODEL}"
+    data["model"] = f"Logos · {model or MODEL}"
 
     # hand off to the shared Deep Dives render/publish pipeline
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as jf:
@@ -91,4 +92,6 @@ def generate(topic: str, tier: str = "standard") -> None:
 
 
 if __name__ == "__main__":
-    generate(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "standard")
+    generate(sys.argv[1],
+             sys.argv[2] if len(sys.argv) > 2 else "standard",
+             sys.argv[3] if len(sys.argv) > 3 else None)

@@ -633,26 +633,41 @@ _BARE_DEEPDIVE_RE = re.compile(r'(?i)^deep[\s-]?dive\s+(?:on|about|into)\s+(.+)'
 
 
 def _match_deepdive(text: str):
-    """Return (topic, tier) if this is a request to make a (theological) Deep Dive, else None."""
+    """Return (topic, tier, model) for a (theological) Deep Dive request, else None.
+    An inline 'use opus' / 'go deep' upgrades just this episode; default model is None."""
     m = _DEEPDIVE_RE.match(text) or _BARE_DEEPDIVE_RE.match(text)
     if not m:
         return None
     topic = m.group(1).strip().strip('.?!"“” ')
     if not topic:
         return None
+    # inline model hint
+    model = None
+    mm = re.search(r'(?i)\b(?:use|using|with|in|on)\s+(opus|sonnet|haiku)\b', topic)
+    if mm:
+        model = mm.group(1).lower()
+        topic = topic[:mm.start()] + topic[mm.end():]
+    elif re.search(r'(?i)\b(?:go\s+deep(?:er)?|deep(?:er)?\s+reasoning|better\s+reasoning|think\s+hard(?:er)?)\b', topic):
+        model = "opus"
+        topic = re.sub(r'(?i)\b(?:go\s+deep(?:er)?|deep(?:er)?\s+reasoning|better\s+reasoning|think\s+hard(?:er)?)\b', '', topic)
+    topic = re.sub(r'\s{2,}', ' ', topic).strip().strip(',;:.- ')
+    if not topic:
+        return None
     tier = ("brief" if re.search(r'(?i)\b(brief|short|quick)\b', text)
             else "deep" if re.search(r'(?i)\b(long|thorough|full|in.?depth)\b', text)
             else "standard")
-    return topic, tier
+    return topic, tier, model
 
 
-def _spawn_theology_deepdive(topic: str, tier: str) -> None:
+def _spawn_theology_deepdive(topic: str, tier: str, model: str | None = None) -> None:
     """Launch the Logos theological Deep Dive generator detached (research + write + hand
     off to the shared Deep Dives render/publish pipeline)."""
     worker = str(Path(__file__).parent / "podcast_theology.py")
     logf = open(os.path.expanduser("~/.cache/logos_deepdive_last.log"), "w")
-    subprocess.Popen([_sys.executable, worker, topic, tier],
-                     cwd=str(Path(__file__).parent),
+    args = [_sys.executable, worker, topic, tier]
+    if model:
+        args.append(model)
+    subprocess.Popen(args, cwd=str(Path(__file__).parent),
                      stdout=logf, stderr=subprocess.STDOUT, start_new_session=True)
 
 
@@ -675,14 +690,15 @@ async def handle_message(message: Message):
     # method, then hands off to the shared Deep Dives pipeline. Short-circuits the classifier.
     dd = _match_deepdive(text)
     if dd:
-        topic, tier = dd
+        topic, tier, model = dd
+        with_model = f" (with {model})" if model else ""
         await message.answer(
-            f"🎙️ On it — researching and writing a Deep Dive on “{topic}” through the Logos "
-            f"lens (Reformed, redemptive-historical, honest about what Scripture settles). "
+            f"🎙️ On it — researching and writing a Deep Dive on “{topic}”{with_model} through the "
+            f"Logos lens (Reformed, redemptive-historical, honest about what Scripture settles). "
             f"Runs in the background: web research + a Kokoro render (~30–40 min for a short "
             f"one). I'll publish it to your Deep Dives podcast — audio + full write-up — and ping you.",
             parse_mode="Markdown")
-        _spawn_theology_deepdive(topic, tier)
+        _spawn_theology_deepdive(topic, tier, model)
         return
 
     # Classify intent
